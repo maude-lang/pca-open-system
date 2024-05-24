@@ -1,0 +1,63 @@
+---- JSON representation and printing
+---- Since we are using a MongoDB storing Json files, we need to be able to 
+---- represent them to insert and query.
+---- This module provides a JsonValue type and and operation serialize : JsonValue -> String
+
+fmod JSON-DECL is
+	sort JsonValue .
+endfm
+
+view JsonValue from TRIV to JSON-DECL is
+	sort Elt to JsonValue .
+endv
+
+fmod JSON is
+	pr INT .
+	pr FLOAT .
+	pr LIST{JsonValue} .
+	pr MAP{String, JsonValue} .
+
+	---- Variant of JSON values
+	op null : -> JsonValue [ctor] .
+	op b : Bool -> JsonValue [ctor] .
+	op n : Int -> JsonValue [ctor] .
+	op n : Float -> JsonValue [ctor] .
+	op s : String -> JsonValue [ctor] .
+	op a : List{JsonValue} -> JsonValue [ctor] .
+	op d : Map{String, JsonValue} -> JsonValue [ctor] .
+endfm
+
+fmod JSON-PRINT is
+	pr JSON .
+	pr CONVERSION .
+
+	op serialize : JsonValue -> String .
+
+	var N : Nat .
+	var F : Float .
+	var S : String .
+	var J : JsonValue .
+	var L : List{JsonValue} .
+	var NeL : NeList{JsonValue} .
+	var E1 E2 : Entry{String, JsonValue} .
+	var M : Map{String, JsonValue} .
+
+	eq serialize(null) = "null" .
+	eq serialize(b(true)) = "true" .
+	eq serialize(b(false)) = "false" .
+	eq serialize(n(N)) = string(N, 10) .
+	eq serialize(n(F)) = string(F) .
+	eq serialize(s(S)) = "\"" + S + "\"" .
+	eq serialize(a(L)) = "[" + serialize(L) + "]" .
+	eq serialize(d(M)) = "{" + serialize(M) + "}" .
+
+	op serialize : List{JsonValue} -> String .
+	op serialize : Map{String, JsonValue} -> String .
+
+	eq serialize(nil) = "" .
+	eq serialize(J NeL) = serialize(J) + ", " + serialize(NeL) .
+
+	eq serialize(empty) = "" .
+	eq serialize(S |-> J) = "\"" + S + "\": " + serialize(J) .
+	eq serialize((E1, E2, M)) = serialize(E1) + ", " + serialize((E2, M)) .
+endfm

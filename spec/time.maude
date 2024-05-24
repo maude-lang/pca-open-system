@@ -1,0 +1,140 @@
+---- Time is specified in this module as in the predefined TIME module in the time.maude file
+---- distributed as part of the official release of Maude. 
+
+---- O                      timeManager 
+---- |    getTimeSinceEpoch()    |
+---- | ------------------------> |
+---- |   gotTimeSinceEpoch(Tm)   |
+---- | <-----------------------  |
+---- |                           | 
+---- |         createTimer()     |
+---- | ------------------------> |
+---- |   createdTimer(timer(i))  |    timer(i)   
+---- | <-----------------------  |        |
+---- |                                    |
+---- | startTimer(periodic / oneShot, Tm) |
+---- | ---------------------------------> |
+---- |           startedTimer()           |
+---- | <--------------------------------- |             
+---- |                                    |
+---- |              timeOut()             |
+---- | <--------------------------------- |             
+---- |                                    |
+---- |            stopTimer()             |
+---- | ---------------------------------> |
+---- |            stopedTimer()           |
+---- | <--------------------------------- |             
+---- |                                    |
+---- |            deleteTimer()           |
+---- | ---------------------------------> |
+---- |            deletedTimer()          |
+---- | <--------------------------------- |             
+
+sload open-system
+sload real-time-maude
+
+omod TIME is
+  inc OPEN-SYSTEM .
+  inc STRING .
+  pr POSRAT-TIME-DOMAIN-WITH-INF * (sort Time to RTMTime) .
+ 
+  sort System .
+  op {_,_} : Configuration RTMTime -> System .
+
+  sorts TimerMode . 
+  ops oneShot periodic : -> TimerMode [ctor] . 
+
+  op timeManager : -> Oid .
+  op timer : Nat -> Oid .
+
+  class Timer | timerMode : TimerMode, time : TimeInf, timer : TimeInf, owner : Maybe{Oid} .
+
+  op _seconds : Nat -> Nat . 
+  eq N seconds = 1000000000 * N . 
+
+  sort DlyMsg . ---- Delayed messages
+  subsort Msg < DlyMsg < Configuration .
+  op dly : Msg RTMTime -> DlyMsg .
+
+  msg getTimeSinceEpoch : Oid Oid -> Msg .
+  msg gotTimeSinceEpoch : Oid Oid Nat -> Msg .
+
+  msg createTimer : Oid Oid -> Msg . 
+  msg createdTimer : Oid Oid Oid -> Msg .
+  msg startTimer : Oid Oid TimerMode NzNat -> Msg . 
+  msg startedTimer : Oid Oid -> Msg . 
+  msg timeOut : Oid Oid -> Msg .
+  msg stopTimer : Oid Oid -> Msg .
+  msg stoppedTimer : Oid Oid -> Msg .
+  msg deleteTimer : Oid Oid -> Msg .
+  msg deletedTimer : Oid Oid -> Msg .
+  msg timeError : Oid Oid String -> Msg .
+
+  vars S O R : Oid .
+  var  N : Nat .
+  vars T T' : RTMTime .
+  var  Conf : Configuration .
+
+  rl [getTimeSinceEpoch] :
+     { < timeManager : ObjectManager | >
+       getTimeSinceEpoch(timeManager, O)
+       Conf, T }
+  => { < timeManager : ObjectManager | >
+       gotTimeSinceEpoch(O, timeManager, trunc(T))
+       Conf, T } .
+
+  rl [create] :
+     < timeManager : ObjectManager | index : N >
+     createTimer(timeManager, O)
+  => < timeManager : ObjectManager | index : s N >
+     < timer(N) : Timer | timerMode : oneShot, time : INF, timer : INF, owner : null > 
+     createdTimer(O, timeManager, timer(N)) .
+
+  rl [start] :
+     < S : Timer | > 
+     startTimer(S, O, periodic, T)
+  => < S : Timer | timerMode : periodic, time : T, timer : T, owner : O > 
+     startedTimer(O, S) .
+
+  rl [stop] :
+     < S : Timer | > 
+     stopTimer(S, O)
+  => < S : Timer | timerMode : periodic, timer : INF > 
+     stoppedTimer(O, S) .
+
+  rl [delete] :
+     < S : Timer |  > 
+     deleteTimer(S, O)
+  => deletedTimer(O, S) .
+
+  rl [timeOut] : 
+     < S : Timer | timerMode : periodic, time : T, timer : 0, owner : O > 
+  => < S : Timer | timer : T > 
+     timeOut(O, S) .
+
+  crl [tick] : 
+     { Conf, T:RTMTime }
+  => { delta(Conf, T':RTMTime), T:RTMTime + T':RTMTime }
+  if ----T:RTMTime < 2 * ROUND-TIME
+  ----/\ 
+  T':RTMTime := mte(Conf) 
+  /\ T':RTMTime > 0 .
+
+  op mte : Configuration -> TimeInf .
+  op mteAux : Configuration -> TimeInf .
+  eq mte(M:Msg Conf) = INF .
+  eq mte(Conf) = mteAux(Conf) [owise] .
+  eq mteAux(< S : Timer | timer : T > Conf) = min(T, mteAux(Conf)) .
+  eq mteAux(dly(M:Msg, T) Conf) = min(T, mteAux(Conf)) .
+  eq mteAux(Obj:Object Conf) = mteAux(Conf) [owise] .
+  eq mteAux(none) = INF .
+
+  op delta : Configuration RTMTime -> Configuration .
+  eq delta(< S : Timer | timer : T > Conf, T')
+    = < S : Timer | timer : sd(T, T') > delta(Conf, T') .
+  eq delta(dly(M:Msg, T) Conf, T') 
+    = dly(M:Msg, sd(T, T')) delta(Conf, T') .
+  eq delta(Conf, T) = Conf [owise] .  
+
+  eq dly(M:Msg, 0) = M:Msg .
+endom

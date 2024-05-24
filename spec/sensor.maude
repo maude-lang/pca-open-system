@@ -1,0 +1,105 @@
+---- New sensors are created with createTempSensor(sensorManager, O) / createdTempSensor(O, sensor(i)) messages.
+---- Two types of sensors, suclasses of Sensor, can be created: TempSensor and PulseSensor.
+---- New reads from the sensor are requested with read(S, O) / readResponse(O, S, N) messages.
+---- TempSensor instances answer to read messages with a random value in the range [36.1,37.2].
+---- PulseSensor instances answer to read messages with a random value in the range [60.0,100.0].
+----   
+---- O                      sensorManager 
+---- |       createXSensor()     |
+---- | ------------------------> |
+---- | createdXSensor(sensor(i)) |     sensor(i)   
+---- | <-----------------------  |        |
+---- |                                    |
+---- |                read()              |
+---- | ---------------------------------> |
+---- |           readResponse(N)          |
+---- | <--------------------------------- |             
+---- |                                    |
+---- |           destroySensor()          |
+---- | ---------------------------------> |
+---- |          destroyedSensor()         |
+---- | <--------------------------------- |             
+
+sload open-system
+
+omod SENSOR is
+  inc OPEN-SYSTEM .
+  pr FLOAT .
+ 
+  op sensorManager : -> Oid .
+  op sensor : Nat -> Oid .
+
+  class Sensor | current : Float .
+  class TempSensor .
+  class PulseSensor .
+  subclasses TempSensor PulseSensor < Sensor .
+       
+  msg createTempSensor : Oid Oid -> Msg . 
+  msg createdTempSensor : Oid Oid Oid -> Msg .
+  msg createPulseSensor : Oid Oid -> Msg . 
+  msg createdPulseSensor : Oid Oid Oid -> Msg .
+  msg read : Oid Oid -> Msg .
+  msg readResponse : Oid Oid Float -> Msg .
+  msg destroySensor : Oid Oid -> Msg .
+  msg destroyedSensor : Oid Oid -> Msg .
+
+  vars S O R : Oid .
+  var  N : Nat .
+  var  F : Float .
+
+  rl [create] :
+     < sensorManager : ObjectManager | index : N >
+     createTempSensor(sensorManager, O)
+  => < sensorManager : ObjectManager | index : s N >
+     < sensor(N) : TempSensor | current : 36.7 > 
+     createdTempSensor(O, sensorManager, sensor(N)) .
+  rl [create] :
+     < sensorManager : ObjectManager | index : N >
+     createPulseSensor(sensorManager, O)
+  => < sensorManager : ObjectManager | index : s N >
+     < sensor(N) : PulseSensor | current : 80.0 > 
+     createdPulseSensor(O, sensorManager, sensor(N)) .
+
+ ---- temperature can range between 97 F (36.1 C) and 99 F (37.2 C)
+  crl [read] :
+     < S : TempSensor | current : F > 
+     read(S, O)
+  => < S : TempSensor | current : F > 
+     readResponse(O, S, F - 0.1) 
+  if F > 36.2 .
+  rl [read] :
+     < S : TempSensor | current : F > 
+     read(S, O)
+  => < S : TempSensor | current : F > 
+     readResponse(O, S, F) .
+  crl [read] :
+     < S : TempSensor | current : F > 
+     read(S, O)
+  => < S : TempSensor | current : F > 
+     readResponse(O, S, F + 0.1) 
+  if F < 37.1 .
+
+  ---- The normal pulse for healthy adults ranges from 60 to 100 beats per minute.
+  crl [read] :
+     < S : PulseSensor | current : F > 
+     read(S, O)
+  => < S : PulseSensor | current : F > 
+     readResponse(O, S, F - 1.0) 
+  if F > 61.0 .
+  rl [read] :
+     < S : PulseSensor | current : F > 
+     read(S, O)
+  => < S : PulseSensor | current : F > 
+     readResponse(O, S, F) .
+  crl [read] :
+     < S : PulseSensor | current : F > 
+     read(S, O)
+  => < S : PulseSensor | current : F > 
+     readResponse(O, S, F + 1.0) 
+  if F < 99.0 .
+
+  rl [destroy] :
+     < S : Sensor |  > 
+     destroySensor(S, O)
+  => destroyedSensor(O, S) .
+endom

@@ -1,0 +1,51 @@
+sload ../spec/configuration
+ 
+fmod MAYBE{X :: TRIV} is 
+  sort Maybe{X} .
+  subsort X$Elt < Maybe{X} .
+  op maybe{X} : -> Maybe{X} .
+endfm 
+
+view Oid from TRIV to CONFIGURATION is 
+  sort Elt to Oid .
+endv 
+
+omod OPEN-SYSTEM is
+  pr MAYBE{Oid} * (op maybe{Oid} to null).
+  pr STRING .
+
+  ---- Period between two consecutive sensor readings
+  op TICK-PERIOD : -> Nat .
+  ---- Initial amount dose to be shot
+  op SHOT-AMOUNT : -> Nat .
+  ---- Initial maximum amount of dose to be administered in a whole run
+  op ROUND-AMOUNT : -> Nat .
+  ---- Minimum delay between shots
+  op TIME-BETWEEN-SHOTS : -> Nat .
+  ---- Duration of a round
+  op ROUND-TIME : -> Nat .
+  ---- Delay between two monitor checks
+  op MONITOR-PERIOD : -> Nat .
+  ---- IP addresses and ports for the temperature and pulse sensors
+  ops IP-TEMP-SENSOR IP-PULSE-SENSOR : -> String .
+  ops PORT-TEMP-SENSOR PORT-PULSE-SENSOR : -> Nat .
+  ---- Mongo's database URI
+  op DATABASE-URI : -> String .
+  ---- Actuator 'device' file path
+  op ACTUATOR-PATH : -> String .
+
+  op processing : Msg -> Msg [frozen] .
+  op oid : Nat -> Oid .
+
+  ops sensorManager actuatorManager databaseManager 
+      monitorManager : -> Oid . 
+  class ObjectManager | index : Nat .
+ 
+  op <PCA> : -> Configuration . ---- PCA portal
+  eq <PCA> 
+    = < sensorManager : ObjectManager | index : 0 >
+      < actuatorManager : ObjectManager | index : 0 > 
+      < databaseManager : ObjectManager | index : 0 > 
+      < monitorManager : ObjectManager | index : 0 > .
+endom
+

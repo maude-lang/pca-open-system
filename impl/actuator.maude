@@ -1,0 +1,98 @@
+---- New actuators are created with create(Actuator, O, A) / created(O, A) messages.
+---- Messages shoot(A, O, N) / shot(O, A) delivers the specified amount of medicine.
+----
+---- The interface to the simulated actuator is a named pipe (standard for a device
+---- file controlling an electronic pump) that expects the amount of analgesia to
+---- be written as a floating-point decimal number followed by a null character.
+---- 
+---- O                       actuatorManager
+---- |    createActuator()          |
+---- | createdActuator(actuator(i)) |
+---- | <--------------------------- |   actuator(i)
+---- |                                       |
+---- |            shoot(N)                   |
+---- | ------------------------------------> |
+---- |             shot()                    |
+---- | <------------------------------------ |
+
+sload open-system
+sload file
+
+omod ACTUATOR is
+  inc OPEN-SYSTEM .
+  inc FILE .
+  pr CONVERSION .
+ 
+  op actuator : Nat -> Oid .
+
+  class Actuator | pipe : Maybe{Oid} .
+       
+  msg createActuator : Oid Oid -> Msg . 
+  msg createdActuator : Oid Oid Oid -> Msg .
+  msg shoot : Oid Oid Float -> Msg .
+  msg shot : Oid Oid -> Msg .
+  msg reset : Oid Oid -> Msg .
+  msg resetAck : Oid Oid -> Msg .
+  msg destroyActuator : Oid Oid -> Msg . 
+  msg destroyedActuator : Oid Oid -> Msg .
+
+  vars A O O' S : Oid .
+  var  N : Nat .
+  var  F : Float .
+
+  rl [create] :
+     < actuatorManager : ObjectManager | index : N > 
+     createActuator(actuatorManager, O)
+  => < actuator(N) : Actuator | pipe : null >
+     processing(createActuator(actuator(N), O))
+     < actuatorManager : ObjectManager | index : s N >
+     openFile(fileManager, actuator(N), ACTUATOR-PATH, "w") .
+  rl [create] :
+     < A : Actuator | pipe : null >
+     processing(createActuator(A, O))
+     openedFile(A, fileManager, S)
+  => < A : Actuator | pipe : S >
+     createdActuator(O, actuatorManager, A) .
+
+  rl [shoot] : 
+     < A : Actuator | pipe : S > 
+     shoot(A, O, F)
+  => < A : Actuator | pipe : S > 
+     processing(shoot(A, O, F))
+     write(S, A, string(F) + "\0") .
+  rl [shoot] : ---- flush the stream immediatly
+     < A : Actuator | pipe : S > 
+     wrote(A, S)
+  => < A : Actuator | pipe : S > 
+     flush(S, A) .
+  rl [shoot] :
+     < A : Actuator | pipe : S > 
+     processing(shoot(A, O, F))
+     flushed(A, S)
+  => < A : Actuator | pipe : S > 
+     shot(O, A) .
+
+  rl [reset] : ---- it doesn't do anything
+     < A : Actuator | > 
+     reset(A, O)
+  => < A : Actuator | > 
+     resetAck(O, A) .
+
+  rl [destroy] :
+     < A : Actuator | pipe : S > 
+     destroyActuator(A, O)
+  => < A : Actuator | pipe : S > 
+     processing(destroyActuator(A, O))
+     closeFile(S, A) .
+  rl [destroy] :
+     < A : Actuator | pipe : S > 
+     processing(destroyActuator(A, O))
+     closedFile(A, S)
+  => destroyedActuator(O, A) .
+endom
+
+eof
+erewrite <>
+  < actuatorManager : ObjectManager | index : 0 >
+  createActuator(actuatorManager, oid(0))
+  shoot(actuator(0), oid(0), 1.0) .

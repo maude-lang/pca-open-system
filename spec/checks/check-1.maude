@@ -1,0 +1,51 @@
+---- Property: The amount administered by the actuator does not go over the prescribed amount in a round
+---- Since the state space is infinite, an abstraction is defined in the module ABSTRACT-PCA and the 
+---- check is performed on it. 
+
+---- Choose whether running the check on pca.maude or on pca2.maude by commenting out one or the other
+sload ../pca.maude
+---- sload ../pca2.maude
+
+omod ABSTRACT-PCA is
+  inc PCA .
+
+  vars P O G A D T M : Oid .
+  var  S S' : String .
+  var  NzT : NzTime .
+  var  Conf : Configuration .
+  var  F : Float .
+  var  Log : NeList{JsonValue} .
+  var  Tm : RTMTime .
+
+---- The Exit button is removed. Instead of abstracting it by removing the messages 
+---- with this equation, the rule generating the messages could be commented out. 
+---- Even though the result is the same, computationally it means a gain of ~40% of the time. 
+  eq buttonPressed(O, G, "Exit") = none .
+---- Time cannot pass if there are messages remaining to be consumed. Clicking the Shot
+---- button at the same time doesn't add anything, since all subsequent messages will 
+---- be ignored. With this equation we eliminate duplicates of shot buttonPressed
+---- messages. We may still have inifinite sequences of buttonPressed + message ignored. 
+  eq buttonPressed(O, G, "Shot") 
+     buttonPressed(O, G, "Shot") 
+   = buttonPressed(O, G, "Shot") .
+---- As for Exit buttonPressed messages, instead of removing them, the rule genarating them
+---- could be removed so that they are not generated. The computation time gained would be 
+---- significant. 
+  eq valueChanged(O, G, S, S') = none .
+---- The global time is only used to create the timestamps for the log, and then by the 
+---- monitor as a reference to compute the amount administered in the last 4 hours. The 
+---- log is not used in the check of the vlaue of the actuator, and the monitor doesn't 
+---- play any role in this property either. The global clock is abstracted away.
+  eq { Conf, NzT } = { Conf, 0 } .
+---- As already said, the log is irrelevant to this property. 
+  eq < D : Database | log : Log >
+   = < D : Database | log : nil > .
+endom
+
+---- With the above abstraction, the state space is made finite. 
+
+search { init, 0 } 
+          =>* {< A : Actuator | amount : F > Conf, Tm} s.t. F > float(ROUND-AMOUNT) .
+eof
+No solution.
+states: 5169839  rewrites: 99117686 in 2148617ms cpu (2145270ms real) (46130 rewrites/second)

@@ -1,0 +1,91 @@
+---- New dbs are created with createDatabase(databaseManager, O) / createdDatabase(O, database(i)) messages.
+---- Messages insert(D, O, J) / inserted(O, D) submit the event to add to the db.
+---- Messages query(D, O, Q) / queryResult(O, D, Str) handle the query Q.
+---- In this specification only doseSince(N) queries are handled. It computes the amount of drug shot since N.
+---- 
+---- O                     databaseManager
+---- |       createDatabase()       |
+---- | ---------------------------> |
+---- | createdDatabase(database(i)) |
+---- | <--------------------------  |   database(i)
+---- |                                       |
+---- |              insert(J)                |
+---- | ------------------------------------> |
+---- |              inserted()               |
+---- | <------------------------------------ |
+---- |                                       |
+---- |              query(Q)                 |
+---- | ------------------------------------> |
+---- |           queryResult(R)              |
+---- | <------------------------------------ |
+---- |                                       |
+---- |            destroyDatabase()          |
+---- | ------------------------------------> |
+---- |           destroyedDatabase()         |
+---- | <------------------------------------ |
+
+sload open-system
+sload json
+
+omod DATABASE is
+  inc OPEN-SYSTEM .
+  pr LIST{JsonValue} .
+  inc JSON .
+  inc CONVERSION .
+
+  class Database | log : List{JsonValue} .
+  op database : Nat -> Oid .
+
+  msg createDatabase : Oid Oid -> Msg . 
+  msg createdDatabase : Oid Oid Oid -> Msg .
+  msg destroyDatabase : Oid Oid -> Msg . 
+  msg destroyedDatabase : Oid Oid -> Msg .
+  msg insert : Oid Oid JsonValue -> Msg .
+  msg inserted : Oid Oid -> Msg .
+  msg query : Oid Oid Query -> Msg .
+  msg queryResult : Oid Oid String -> Msg .
+
+  *** Query minilanguage
+  sort Query .
+  op doseSince : Nat -> Query [ctor] .
+
+  vars D O : Oid .
+  var  J : JsonValue .
+  var  Log : List{JsonValue} .
+  var  N M V : Nat .
+  var  Q : Query .
+  var  F : Float .
+  var  Ks : Map{String, JsonValue} .
+
+  rl [create] :
+     < databaseManager : ObjectManager | index : N > 
+     createDatabase(databaseManager, O)
+  => < databaseManager : ObjectManager | index : s N > 
+     < database(N) : Database | log : nil >
+     createdDatabase(O, databaseManager, database(N)) .
+
+  rl [insert] :
+     < D : Database | log : Log > 
+     insert(D, O, J)
+  => < D : Database | log : Log J > 
+     inserted(O, D) .
+
+  rl [query] :
+     < D : Database | log : Log > 
+     query(D, O, Q)
+  => < D : Database | > 
+     queryResult(O, D, string(compute(Q, Log))) .
+
+  rl [destroy] :
+     < D : Database | > 
+     destroyDatabase(D, O)
+  => destroyedDatabase(O, D) .
+
+  ---- Computes queries in Maude
+  op compute : Query List{JsonValue} -> Float .
+  eq compute(doseSince(N), nil) = 0.0 .
+ ceq compute(doseSince(N), d(("time" |-> n(M), "decision" |-> s("shot"), "value" |-> n(V), Ks)) Log) 
+   = float(V) + compute(doseSince(N), Log) 
+   if M >= N .
+  eq compute(doseSince(N), J Log) = compute(doseSince(N), Log) [owise] .
+endom

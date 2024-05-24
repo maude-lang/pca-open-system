@@ -1,0 +1,45 @@
+---- The OPEN-SYSTEM module defines the basic common infrastructure for the definition of 
+---- the open system. Specifically, it defines the ObjectManager class and a constant <PCA>
+---- with the manager objects in the system. Declarations for the different constants of 
+---- the system are also in this module. 
+
+sload configuration
+ 
+fmod MAYBE{X :: TRIV} is 
+  sort Maybe{X} .
+  subsort X$Elt < Maybe{X} .
+  op maybe{X} : -> Maybe{X} .
+endfm 
+
+view Oid from TRIV to CONFIGURATION is 
+  sort Elt to Oid .
+endv 
+
+omod OPEN-SYSTEM is
+  pr MAYBE{Oid} * (op maybe{Oid} to null).
+  pr NAT .
+
+  op TICK-PERIOD : -> Nat .
+  op SHOT-AMOUNT : -> Nat .
+  op ROUND-AMOUNT : -> Nat .
+  op TIME-BETWEEN-SHOTS : -> Nat .
+  op ROUND-TIME : -> Nat .
+  op MONITOR-PERIOD : -> Nat .
+
+  op processing : Msg -> Msg [frozen] .
+  op oid : Nat -> Oid .
+
+  ops guiManager sensorManager actuatorManager databaseManager 
+      monitorManager timeManager : -> Oid . 
+  class ObjectManager | index : Nat .
+
+  op <PCA> : -> Configuration . ---- PCA portal
+  rl <PCA> 
+  => < guiManager : ObjectManager | index : 0 > 
+     < sensorManager : ObjectManager | index : 0 > 
+     < actuatorManager : ObjectManager | index : 0 > 
+     < databaseManager : ObjectManager | index : 0 > 
+     < monitorManager : ObjectManager | index : 0 > 
+     < timeManager : ObjectManager | index : 0 > .
+endom
+

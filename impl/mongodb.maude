@@ -1,0 +1,190 @@
+---- New dbs are created with create(Database, O, A) / created(O, A) messages.
+---- Messages insert(A, O, J) / inserted(O, A) submit the event to add to the db.
+----
+---- Implemented with a MongoDB database. The Database objects runs Mongo's
+---- command-line client mongosh, write commands to its standard input, and
+---- reads the replies from standard output.
+---- 
+---- O                     databaseManager
+---- |       createDatabase()       |
+---- | ---------------------------> |
+---- | createdDatabase(database(i)) |
+---- | <--------------------------  |   database(i)
+---- |                                       |
+---- |              insert(J)                |
+---- | ------------------------------------> |
+---- |               inserted()              |
+---- | <------------------------------------ |
+
+sload open-system
+sload process
+sload file
+sload time
+sload json
+
+omod DATABASE is
+  inc OPEN-SYSTEM .
+  inc PROCESS .
+  inc JSON-PRINT .
+  inc TIME .
+
+  class Database | process : Maybe{Oid}, io : Maybe{Oid}, err : Maybe{Oid}, state : Nat, busy : Bool, iostream : String .
+
+  ---- buffered io socket 
+
+  msg Receive : Oid Oid -> Msg .
+  msg Received : Oid Oid String -> Msg .
+
+  rl [Receive] :
+    < D : Database | io : IO, iostream : S >
+    Receive(IO, O)
+  => if find(S, "pcadb> ", 0) == notFound
+     then < D : Database | >
+          receive(IO, O) 
+          processing(Receive(IO, O))
+     else < D : Database | iostream : substr(S, find(S, "pcadb> ", 0) + 7, length(S)) >
+          Received(O, IO, substr(S, 0, find(S, "pcadb> ", 0)))
+     fi .
+  rl [Receive] :
+    < D : Database | iostream : S >
+    processing(Receive(IO, O))
+    received(O, IO, DATA)
+  => if find(S + DATA, "pcadb> ", 0) == notFound
+     then < D : Database | iostream : S + DATA >
+          receive(IO, O) 
+          processing(Receive(IO, O))
+     else < D : Database | iostream : substr(S + DATA, find(S + DATA, "pcadb> ", 0) + 7, length(S + DATA)) >
+          Received(O, IO, substr(S + DATA, 0, find(S + DATA, "pcadb> ", 0)))
+     fi .
+
+  op database : Nat -> Oid .
+
+  msg createDatabase : Oid Oid -> Msg . 
+  msg createdDatabase : Oid Oid Oid -> Msg .
+  msg destroyDatabase : Oid Oid -> Msg . 
+  msg destroyedDatabase : Oid Oid -> Msg .
+  msg insert : Oid Oid JsonValue -> Msg .
+  msg inserted : Oid Oid -> Msg .
+  msg query : Oid Oid Query -> Msg .
+  msg queryResult : Oid Oid String -> Msg .
+
+  ---- Query minilanguage
+  sort Query .
+  op doseSince : Nat -> Query [ctor] .
+
+  vars D O P IO ERR : Oid .
+  var  Str Result S S' DATA : String .
+  var  J : JsonValue .
+  var  N : Nat .
+  var  Q : Query .
+
+  rl [create] :
+     < databaseManager : ObjectManager | index : N > 
+     createDatabase(databaseManager, O)
+  => < databaseManager : ObjectManager | index : s N > 
+     processing(createDatabase(database(N), O))
+     < database(N) : Database | process : null, io : null, err : null, busy : true, state : 0, iostream : "" >
+     createProcess(processManager, database(N), "mongosh", "--quiet" DATABASE-URI, none) .
+  rl [create] :
+     < D : Database | state : 0 >
+     processing(createDatabase(D, O))
+     createdProcess(D, processManager, P, IO, ERR)
+  => < D : Database | process : P, io : IO, err : ERR, state : 1 >
+     processing(createDatabase(D, O))
+     Receive(IO, D) . *** receive the initial prompt
+  rl [create] :
+     < D : Database | io : IO, state : 1 >
+     processing(createDatabase(D, O))
+     Received(D, IO, Str)
+  => < D : Database | busy : false, state : 0 >
+     createdDatabase(O, databaseManager, D) .
+
+  rl [insert] :
+     < D : Database | io : IO, busy : false, state : 0 >
+     insert(D, O, J)
+  => < D : Database | busy : true, state : 1 >
+     processing(insert(D, O, J))
+     send(IO, D, "db.PCAlog.insertOne(" + serialize(J) + ");\n") .  *** not safe against injection
+  rl [insert] :
+     < D : Database | io : IO, state : 1 >
+     processing(insert(D, O, J))
+     sent(D, IO)
+  => < D : Database | state : 2 >
+     processing(insert(D, O, J))
+     Receive(IO, D) .
+  rl [insert] :
+     < D : Database | io : IO, state : 2 >
+     processing(insert(D, O, J))
+     Received(D, IO, Str) 
+  => < D : Database | busy : false, state : 0 >
+     inserted(O, D) .
+
+  rl [destroy] :
+     < D : Database | io : IO, busy : false >
+     destroyDatabase(D, O)
+  => < D : Database | busy : true >
+     processing(destroyDatabase(D, O))
+     send(IO, D, "quit\n") .
+  rl [destroy] :
+     < D : Database | process : P, io : IO >
+     processing(destroyDatabase(D, O))
+     sent(D, IO)
+  => < D : Database | >
+     processing(destroyDatabase(D, O))
+     waitForExit(P, D) .
+  rl [destroy] :
+     < D : Database | process : P >
+     processing(destroyDatabase(D, O))
+     exited(D, P, V:ExitStatus)
+  => destroyedDatabase(O, D) .
+
+  ---- Queries
+
+  rl [query] :
+     < D : Database | io : IO, busy : false, state : 0 > 
+     query(D, O, Q)
+  => < D : Database | busy : true, state : 1 >
+     processing(query(D, O, Q))
+     send(IO, D, compose(Q) + ";\n") .
+  rl [query] :
+     < D : Database | io : IO, state : 1 > 
+     processing(query(D, O, Q))
+     sent(D, IO)
+  => < D : Database | state : 2 >
+     processing(query(D, O, Q))
+     Receive(IO, D) .
+  rl [query] :
+     < D : Database | io : IO, state : 2 > 
+     processing(query(D, O, Q))
+     Received(D, IO, Result)
+  => < D : Database | busy : false, state : 0 >
+     queryResult(O, D, emptyIsZero(firstLine(Result))) .
+
+  *** Mongo aggregation pipeline calculating the amount of dose administered
+  *** since the timestamp N. It sums the 'value' attribute of every document
+  *** whose attribute 'decision' is 'shot' and 'time' is greater than N
+
+  op compose : Query -> String .
+  eq compose(doseSince(N)) =
+       "db.PCAlog.aggregate([{$match: {decision: 'shot', time: {$gt: " +
+       string(N, 10) +
+       "}}}, {$group: {_id: 0, value: {$sum: '$value'}}}, {$project: {_id: 0}}]).next()?.value" .
+
+  op firstLine : String -> String .
+  eq firstLine(Str) = substr(Str, 0, find(Str, "\n", 0)) .
+
+  op emptyIsZero : String -> String .
+  eq emptyIsZero("") = "0.0" .
+  eq emptyIsZero(Str) = Str [owise] .
+
+  *** for debugging
+  *** rl createdDatabase(O, databaseManager, D) => insert(D, O, d(("time" |-> n(1), "decision" |-> s("shot"), "value" |-> n(3.2)))) .
+  *** rl inserted(O, D) => query(D, O, doseSince(0)) .
+endom
+
+eof
+set print attribute on .
+erewrite <>
+  < databaseManager : ObjectManager | index : 0 > 
+  createDatabase(databaseManager, oid(0))
+.

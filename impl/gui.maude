@@ -1,0 +1,102 @@
+----
+---- by R. Rubio and F. Duran
+---- Maude API for GUI Python external objects
+----
+
+mod GUI is
+	protecting MAP{String, Bool} .
+	protecting NAT .
+	extending CONFIGURATION .
+
+	op guiManager : -> Oid [ctor] .  *** GUI manager object name
+	op window : Nat -> Oid [ctor] .  *** window identifier
+
+	*** GUI portal
+	op <G> : -> Object [ctor special (
+		id-hook SpecialHubSymbol (guiHook)
+	   	op-hook guiError (guiError : Oid Oid String ~> Msg)
+		op-hook valueChanged (valueChanged : Oid Oid String String ~> Msg)
+		op-hook buttonPressed (buttonPressed : Oid Oid String ~> Msg)
+		op-hook configJoin (__ : Configuration Configuration ~> Configuration)
+	)] .
+
+	*** Creation and disposal of windows
+
+	op createWindow :
+		Oid  *** must be guiManager
+	        Oid  *** sender
+	        String  *** window title
+	        Map{String, Bool}  *** field names and whether they are editable
+	        Map{String, Bool}  *** button captions and whether they are clickable
+	   -> Msg [msg ctor special (
+	   	id-hook SpecialHubSymbol (guiHook)
+	   	op-hook guiError (guiError : Oid Oid String ~> Msg)
+	   	op-hook window (window : Nat ~> Oid)
+	   	op-hook createdWindow (createdWindow : Oid Oid Oid ~> Msg)
+	   	term-hook trueTerm (true)
+	   ) ] .
+
+	op createdWindow :
+		Oid  *** sender of createWindow
+		Oid  *** guiManager
+		Oid  *** object id of the new window
+	  -> Msg [msg ctor] .
+
+	op destroyWindow :
+		Oid  *** window object id
+		Oid  *** sender
+	  -> Msg [msg ctor special (
+	   	id-hook SpecialHubSymbol (guiHook)
+	   	op-hook guiError (guiError : Oid Oid String ~> Msg)
+	   	op-hook window (window : Nat ~> Oid)
+	   	op-hook destroyedWindow (destroyedWindow : Oid Oid ~> Msg)
+	   )] .
+
+	op destroyedWindow :
+		Oid  *** sender of destroyWindow
+		Oid  *** window object id
+	  -> Msg [msg ctor] .
+
+
+	*** Error messages
+
+	op guiError :
+		Oid  *** recipient (sender of a malformed message)
+		Oid  *** sender (guiManager or a window)
+		String  *** error message
+	  -> Msg [msg ctor] .
+
+	*** Field manipulation
+
+	op setValue :
+		Oid  *** window object id
+		Oid  *** sender
+		String  *** field name
+		String  *** new value
+	  -> Msg [msg ctor special (
+	   	id-hook SpecialHubSymbol (guiHook)
+	   	op-hook guiError (guiError : Oid Oid String ~> Msg)
+	   	op-hook window (window : Nat ~> Oid)
+	   	op-hook valueSet (valueSet : Oid Oid ~> Msg)
+	   )] .
+
+	op valueSet :
+		Oid  *** sender of setValue
+		Oid  *** window object id
+	  -> Msg [msg ctor] .
+
+	*** Events
+
+	op valueChanged :
+		Oid  *** recipient (window creator)
+		Oid  *** window object id
+		String  *** field name
+		String  *** new value
+	  -> Msg [msg ctor] .
+
+	op buttonPressed :
+		Oid  *** recipient (window creator)
+		Oid  *** window object id
+		String  *** button name
+	  -> Msg [msg ctor] .
+endm

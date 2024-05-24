@@ -1,0 +1,103 @@
+---- New windows are created with createWindow(guiManager, O, Str, EF, CB) / createdWindow(O, window(i)) 
+---- messages.
+---- EF and CB are terms of sort Map{String, Bool} that associate boolean values to the names of the 
+---- fields / buttons in the gui. 
+---- In EF, the boolean value indicates whether the corresponding field is editable or not. 
+---- That is, fields are either editable or non-editable. 
+---- Similarly, in CB, the boolean value indicates whether the corresponding button is clickable or not. 
+---- All fields are text fields. 
+---- Editable fields submit valueChanged(O, G, F, V) messages, indicating that the field F has been 
+---- updated to value V. 
+---- Currently, the new value is an empty string, but still, they can submit valueChanged messages at 
+---- any time. 
+---- Noneditable fields have messages setValue(G, O, F, V) / valueSet(O, G) to update the shown value. 
+---- Clickable buttons submit a buttonPressed(O, G, F) indicating that the button F has been pressed. 
+---- The generation of valueChanged and buttonPressed("Exit") messages are commented out to reduce the 
+---- computational cost of the analysis. 
+---- 
+---- O                         guiManager
+---- |       createWindow(G, EF)   |
+---- | --------------------------> |
+---- |    createdWindow(window(i)) |
+---- | <-------------------------  |   window(i)
+---- |                                    |
+---- |          valueChanged(F, V)        |
+---- | <--------------------------------- |
+---- |                                    |
+---- |           buttonPressed(F)         |
+---- | <--------------------------------- |
+---- |                                    |
+---- |            setValue(F, V)          |
+---- | ---------------------------------> |
+---- |               valueSet()           |
+---- | <--------------------------------- |
+---- |                                    |
+---- |         destroyWindow()            |
+---- | ---------------------------------> |
+---- |          destroyedWindow()         |
+---- | <--------------------------------- |
+
+sload open-system
+
+omod GUI is
+  inc OPEN-SYSTEM .
+  pr MAP{String, Bool} .
+  pr MAP{String, String} .
+  pr TIME .
+ 
+  op window : Nat -> Oid . ---- Windows' ids
+
+  class Gui | fields : Map{String, String}, ---- textfields' contents
+              editable : Map{String, Bool}, ---- editable textfields
+              clickable : Map{String, Bool}, ---- clickable buttons
+              listener : Oid .
+  msg createWindow : Oid Oid String Map{String, Bool} Map{String, Bool} -> Msg .
+  msg createdWindow : Oid Oid Oid -> Msg .
+  msg destroyWindow : Oid Oid -> Msg .
+  msg destroyedWindow : Oid Oid -> Msg .
+  msg guiError : Oid Oid String -> Msg .
+  msg setValue : Oid Oid String String -> Msg .
+  msg valueSet : Oid Oid -> Msg .
+  msg valueChanged : Oid Oid String String -> Msg .
+  msg buttonPressed : Oid Oid String -> Msg .
+
+  vars G O : Oid .
+  var  B : Bool .
+  vars F V V' Str : String .
+  vars EF CB : Map{String, Bool} .
+  var  FV : Map{String, String} .
+  var  N : Nat .
+
+  op createFields : Map{String, Bool} -> Map{String, String} .
+  eq createFields((F |-> B, EF)) = F |-> "", createFields(EF) .
+  eq createFields(empty) = empty .
+
+  rl < guiManager : ObjectManager | index : N > 
+     createWindow(guiManager, O, Str, EF, CB)
+  => < guiManager : ObjectManager | index : s N > 
+     < window(N) : Gui | fields : createFields(EF), editable : EF, clickable : CB, listener : O >
+     createdWindow(O, guiManager, window(N)) .
+
+  ---- These rules are ok for analysis, but any attempt to rewrite the system will 
+  ---- end up in executions in which only new of these messages are generated.  
+  rl [textfield-changed] :
+     < G : Gui | fields : (F |-> V, FV), editable : (F |-> true, EF), listener : O >
+  => < G : Gui | >
+     valueChanged(O, G, F, V) . 
+  rl [button-pressed] :
+     < G : Gui | clickable : (F |-> true, EF), listener : O >
+  => < G : Gui | >
+     buttonPressed(O, G, F) . 
+
+  rl [set] :
+     < G : Gui | fields : (F |-> V, FV), listener : O >
+     setValue(G, O, F, V') 
+  => < G : Gui | fields : (F |-> V', FV) >
+     valueSet(O, G) .
+
+  rl [destroyWindow] :
+     < G : Gui | listener : O >
+     destroyWindow(G, O) 
+  => destroyedWindow(O, G) .
+endom
+

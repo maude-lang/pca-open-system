@@ -1,0 +1,141 @@
+---- New monitor objects are created with createMonitor(monitorManager, O) / createdMonitor(O, monitor(i)) 
+---- messages. 
+---- Once created, the operation of monitors starts with messages startMonitor(M, P, D) / startedMonitor(P, M),
+---- where D is the identifier of the database that keeps the log of the system. 
+---- When started, a monitor creates a timer, that initializes to periodically deliver a timeOut message. 
+---- Every time a timeOut arrives, it get the current time to calculate the time 4 hours before and 
+---- queries the database. Depending on the result of the query it sends a checked message with either 
+---- ok or failure. 
+---- 
+---- O                         monitorManager
+---- |       createMonitor()       |
+---- | --------------------------> |
+---- |  createdMonitor(monitor(i)) |
+---- | <-------------------------- |   monitor(i)        
+---- |                                    |
+---- |           startMonitor(D)          |                                 timeManager           D
+---- | ---------------------------------> |            createTimer()             |
+---- |                                    | -----------------------------------> |        
+---- |                                    |           createdTimer(T)            |
+---- |                                    | <----------------------------------- |        T
+---- |                                    |       startTimer(periodic, MONITOR-PERIOD)    |
+---- |                                    | --------------------------------------------> |
+---- |                                    |              startedTimer()                   |
+---- |           starterMonitor()         | <-------------------------------------------- |
+---- | <--------------------------------- |                                               |
+-----|                                    |                                               |
+---- |                                    |                timeOut()                      |
+---- |                                    | <-------------------------------------------- |
+---- |                                    |          getTimeSinceEpoch()         |
+---- |                                    | -----------------------------------> |        
+---- |                                    |          gotTimeSinceEpoch(Tm)       |
+---- |                                    | <----------------------------------- |        
+---- |                                    |          query(doseSince(sd(Tm, ROUND-TIME)))         |
+---- |                                    | ----------------------------------------------------> |        
+---- |                                    |                   queryResult(Result)                 |
+---- |       checked(ok / failure)        | <---------------------------------------------------- |        
+---- | <--------------------------------- |
+---- |                                    |
+---- |          destroyMonitor()          |
+---- | ---------------------------------> |                deleteTimer()                 |
+---- |                                    | -------------------------------------------> |        
+---- |                                    |               deletedTimer()                 |
+---- |                                    | <------------------------------------------- |        
+---- |          destroyedMonitor()        |
+---- | <--------------------------------- |
+
+sload open-system
+sload database
+sload time
+
+omod MONITOR is
+  inc OPEN-SYSTEM .
+  pr STRING .
+  inc TIME .
+  inc DATABASE .
+  inc CONVERSION .
+ 
+  op monitorManager : -> Oid .
+  op monitor : Nat -> Oid .
+
+  class Monitor | db : Maybe{Oid}, timer : Maybe{Oid}, pca : Maybe{Oid} .
+
+  sort CheckResult .
+  ops ok failure : -> CheckResult .
+
+  msg createMonitor : Oid Oid -> Msg . 
+  msg createdMonitor : Oid Oid Oid -> Msg .
+  msg startMonitor : Oid Oid Oid -> Msg . 
+  msg startedMonitor : Oid Oid -> Msg .
+  msg check : Oid Oid -> Msg .
+  msg checked : Oid Oid CheckResult -> Msg .
+  msg destroyMonitor : Oid Oid -> Msg .
+  msg destroyedMonitor : Oid Oid -> Msg .
+
+  vars M O D T P : Oid .
+  vars N Tm : Nat .
+  var  Result : String .
+
+  rl [create] :
+     < monitorManager : ObjectManager | index : N >
+     createMonitor(monitorManager, O)
+  => < monitorManager : ObjectManager | index : s N >
+     < monitor(N) : Monitor | db : null, timer : null, pca : null > 
+     createdMonitor(O, monitorManager, monitor(N)) .
+
+  rl [start] :
+     < M : Monitor | db : null, pca : null > 
+     startMonitor(M, P, D)
+  => < M : Monitor | db : D, pca : P > 
+     processing(startMonitor(M, P, D))
+     createTimer(timeManager, M) .
+  rl [start] :
+     < M : Monitor | db : D, timer : null, pca : P > 
+     processing(startMonitor(M, P, D))
+     createdTimer(M, timeManager, T)
+  => < M : Monitor | timer : T > 
+     processing(startMonitor(M, P, D))
+     startTimer(T, M, periodic, MONITOR-PERIOD) .
+  rl [start] :
+     < M : Monitor | db : D, timer : T > 
+     processing(startMonitor(M, P, D))
+     startedTimer(M, T)
+  => < M : Monitor | > 
+     startedMonitor(P, M) .
+
+  rl [check] :
+     < M : Monitor | db : D, timer : T > 
+     timeOut(M, T)
+  => < M : Monitor | > 
+     processing(timeOut(M, T))
+     getTimeSinceEpoch(timeManager, M) .
+  rl [check] :
+     < M : Monitor | db : D, timer : T > 
+     processing(timeOut(M, T))
+     gotTimeSinceEpoch(M, timeManager, Tm)
+  => < M : Monitor | > 
+     processing(timeOut(M, T))
+     query(D, M, doseSince(sd(Tm, ROUND-TIME))) .
+  rl [check] :
+     < M : Monitor | db : D, timer : T, pca : P > 
+     processing(timeOut(M, T))
+     queryResult(M, D, Result)
+  => < M : Monitor | > 
+     checked(P, M, if ok(Result) then ok else failure fi) .
+
+  rl [destroy] :
+     < M : Monitor | timer : T > 
+     destroyMonitor(M, O)
+ => < M : Monitor | >
+     processing(destroyMonitor(M, O))
+     deleteTimer(T, M) .
+  rl [destroy] :
+     < M : Monitor | timer : T > 
+     processing(destroyMonitor(M, O))
+     deletedTimer(M, T)
+  => < M : Monitor | timer : null >
+     destroyedMonitor(O, M) .
+
+  op ok : String -> Bool .
+  eq ok(Result) = if rat(Result, 10) :: Nat then float(rat(Result, 10)) else float(Result) fi <= float(ROUND-AMOUNT) .
+endom

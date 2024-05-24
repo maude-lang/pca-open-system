@@ -1,0 +1,338 @@
+---- The PCA is the heart of the system. 
+---- It creates all the components and controls their execution. 
+---- A Pca object will keep the last values of temperature, pulse, 4-hours dose and shot dose.
+---- Every 1 sec, pulse and temperature are read from corresponding sensors, and the information 
+---- is deliver to the doctor's GUI to keep her informed. 
+---- Upon the arrival of valueChanged messages, it updates its information. 
+---- Upon the arrival of a buttonPressed message it checks whether the shot can be delivered or 
+---- not. If the answer is no, the message is just ignored. If the answer is yes, a shoot message 
+---- with the corresponging shot amount (or the remaining amount if there is not enough to 
+---- complete the 4-hours dose) is delivered.
+---- All events are submitted to the DB object for its recording.
+
+sload json
+sload sensor
+sload actuator
+sload mongodb
+sload monitor
+sload time
+sload gui
+sload tuple
+
+omod PCA is
+  inc OPEN-SYSTEM .
+  inc SENSOR .
+  inc ACTUATOR .
+  inc GUI .
+  inc DATABASE .
+  pr CONVERSION .
+  inc TIME .
+  inc MONITOR .
+  inc JSON .
+  pr TUPLE{Map{Rat, Nat}, Nat} .
+
+  eq IP-TEMP-SENSOR = "127.0.0.1" .
+  eq IP-PULSE-SENSOR = "127.0.0.1" .
+  eq PORT-TEMP-SENSOR = 1234 .
+  eq PORT-PULSE-SENSOR = 1235 .
+  eq DATABASE-URI = "mongodb://127.0.0.1:27017/pcadb" .
+  eq ACTUATOR-PATH = "actuator.pipe" .
+
+  eq TICK-PERIOD = 1 seconds . ---- pulse and temperature are read every 1 sec 
+  eq SHOT-AMOUNT = 3 . ---- 3 mgs
+  eq ROUND-AMOUNT = 10 . ---- 10-20 mgs
+  eq TIME-BETWEEN-SHOTS = 6 * 60 seconds . ---- 6 mins
+  eq ROUND-TIME = 4 * 60 * 60 seconds . ---- 4 hours
+  eq MONITOR-PERIOD = 5 seconds . ---- pulse and temperature are read every 1 sec 
+
+  class Pca | doctor : Maybe{Oid}, temperature : Float, pulse : Float, 4-hours : Nat, shot : Nat,
+              patient : Maybe{Oid}, remaining : Nat, 
+              round : Map{Rat, Nat}, 
+              time-to-next-shot : Nat, 
+              temp-sensor : Maybe{Oid}, 
+              pulse-sensor : Maybe{Oid}, 
+              actuator : Maybe{Oid}, 
+              database : Maybe{Oid},
+              monitor : Maybe{Oid},
+              tick : Maybe{Oid}, 
+              currentTime : Nat, ---- instead of asking the current time, this field is updated with every tick
+              busy : Bool . ---- even though an operation may require several rules, they are considered atomic 
+                            ---- for the Pca, the object is marked as busy at the begining and liberated once completed
+
+  msg create : Cid Oid Oid -> Msg .
+
+  vars P G S TS PS O A D DG PG T M : Oid .
+  vars N N' N'' CR CS Tm Tm' Total Am : Nat .
+  vars NV NV' F TV TV' PV PV' : Float .
+  var  RN : Rat .
+  var  B : Bool .
+  vars FN SV SV' : String .
+  var  EF : Map{String, Bool} .
+  var  Conf : Configuration . 
+  vars Shots Shots' : Map{Rat, Nat} .
+
+  rl [create] :
+     create(Pca, O, P)
+  => < P : Pca | doctor : null, 
+                 temperature : 0.0, pulse : 0.0, 4-hours : 0, shot : 0,
+                 patient : null, 
+                 remaining : 0, round : empty, time-to-next-shot : 0,
+                 temp-sensor : null,
+                 pulse-sensor : null,
+                 actuator : null,
+                 database : null, 
+                 monitor : null,
+                 tick : null,  ---- periodic timer to update countdowns and sensor reads
+                 currentTime : 0, 
+                 busy : true >
+ 		 createWindow(guiManager, P, "Patient",
+ 			 ("remaining amount (mg)" |-> false,
+ 			  "time to next shot (min:sec)" |-> false),
+ 			 ("Shot" |-> true))
+     createTempSensor(sensorManager, P)
+     createPulseSensor(sensorManager, P)
+     createActuator(actuatorManager, P)
+     createDatabase(databaseManager, P)
+     createMonitor(monitorManager, P)
+     createTimer(timeManager, P)
+     getTimeSinceEpoch(timeManager, P) .
+  rl [create] :
+     < P : Pca | doctor : null, patient : null, temp-sensor : null, pulse-sensor : null, actuator : null, database : null, tick : null > 
+     createdWindow(P, guiManager, G) 
+     createdTempSensor(P, sensorManager, TS) 
+     createdPulseSensor(P, sensorManager, PS) 
+     createdDatabase(P, databaseManager, D) 
+     createdMonitor(P, monitorManager, M)
+     createdActuator(P, actuatorManager, A) 
+     createdTimer(P, timeManager, T)
+     gotTimeSinceEpoch(P, timeManager, Tm)
+  => < P : Pca | patient : G, temp-sensor : TS, pulse-sensor : PS, actuator : A, database : D, tick : T, 
+                 remaining : ROUND-AMOUNT, time-to-next-shot : 0, round : empty, monitor : M, currentTime : Tm > 
+     createWindow(guiManager, P, "Clinician",
+			 ("temperature (C)" |-> false,
+			  "pulse" |-> false,
+			  "dose (4 hours)" |-> true,
+			  "dose (shot)" |-> true,
+			  "warnings" |-> false),
+			 ("Exit" |-> true)) 
+     setValue(G, P, "remaining amount (mg)", string(ROUND-AMOUNT, 10))
+  	 setValue(G, P, "time to next shot (min:sec)", timeString(0))
+     startTimer(T, P, periodic, TICK-PERIOD) 
+     startMonitor(M, P, D)
+     insert(D, P, d(("time" |-> n(Tm), "msg" |-> s("execution starts")))) .
+  rl [create] :
+     < P : Pca | doctor : null, patient : PG, tick : T > 
+     createdWindow(P, guiManager, G)
+     valueSet(P, PG)
+     valueSet(P, PG)
+     startedTimer(P, T)
+     startedMonitor(P, M)
+     inserted(P, D)     
+  => < P : Pca | doctor : G, 4-hours : ROUND-AMOUNT, shot : SHOT-AMOUNT > 
+  	 setValue(G, P, "temperature (C)", "0.0")
+  	 setValue(G, P, "pulse", "0")
+  	 setValue(G, P, "dose (4 hours)", string(ROUND-AMOUNT, 10))
+  	 setValue(G, P, "dose (shot)", string(SHOT-AMOUNT, 10))
+  	 setValue(G, P, "warnings", "none") .
+  rl [create] :
+     < P : Pca | doctor : G > 
+     valueSet(P, G)
+     valueSet(P, G)
+     valueSet(P, G)
+     valueSet(P, G)
+     valueSet(P, G)
+  => < P : Pca | busy : false > .
+
+  rl [valueChanged] :
+     < P : Pca | doctor : G, 4-hours : N, database : D, currentTime : Tm, busy : false >
+     valueChanged(P, G, "dose (4 hours)", SV)
+  => < P : Pca | 4-hours : rat(SV, 10), busy : true > 
+     processing(valueChanged(P, G, "dose (4 hours)", SV))
+     insert(D, P, d(("time" |-> n(Tm), "msg" |-> s("value changed"), "key" |-> s("dose (4 hours)"), "value" |-> n(rat(SV, 10))))) .
+  rl [valueChanged] :
+     < P : Pca | doctor : G, shot : N, database : D, currentTime : Tm, busy : false >
+     valueChanged(P, G, "dose (shot)", SV)
+  => < P : Pca | shot : rat(SV, 10), busy : true >
+     processing(valueChanged(P, G, "dose (shot)", SV))
+     insert(D, P, d(("time" |-> n(Tm), "msg" |-> s("value changed"), "key" |-> s("dose (shot)"), "value" |-> n(rat(SV, 10))))) . 
+  rl < P : Pca | >
+     processing(valueChanged(P, G, FN, SV))
+     inserted(P, D)
+  => < P : Pca | busy : false > .
+
+  rl [buttonPressed] :
+     < P : Pca | patient : G, round : Shots, remaining : N, time-to-next-shot : N', actuator : A , database : D, shot : N'', currentTime : Tm, busy : false >
+     buttonPressed(P, G, "Shot")
+  => if N' > 0 ---- the time between shots has not passed
+     or N == 0 ---- no medication
+     then ---- ignore the message
+          < P : Pca | busy : true > 
+          processing(buttonPressed(P, G, "Shot 1"))
+          insert(D, P, d(("time" |-> n(Tm), "msg" |-> s("shot button pressed"), "decision" |-> s("ignored"))))
+     else processing(buttonPressed(P, G, "Shot 2"))
+          if N > N'' ---- enough for a whole shot
+          then ---- deliver whole shot amount and reset the timer
+               < P : Pca | remaining : N - N'', round : (Shots, Tm |-> N''), time-to-next-shot : TIME-BETWEEN-SHOTS, busy : true > 
+               shoot(A, P, float(N''))
+               setValue(G, P, "remaining amount (mg)", string(N - N'', 10))
+               insert(D, P, d(("time" |-> n(Tm), "msg" |-> s("shot button pressed"), "decision" |-> s("shot"), "value" |-> n(N''))))
+          else ---- deliver whatever remains
+               < P : Pca | remaining : 0, round : (Shots, Tm |-> N), time-to-next-shot : TIME-BETWEEN-SHOTS, busy : true > 
+               shoot(A, P, float(N))
+               setValue(G, P, "remaining amount (mg)", string(0, 10))
+               insert(D, P, d(("time" |-> n(Tm), "msg" |-> s("shot button pressed"), "decision" |-> s("shot"), "value" |-> n(N))))
+          fi
+     fi .
+  rl [buttonPressed] :
+     < P : Pca | patient : G, actuator : A > 
+     processing(buttonPressed(P, G, "Shot 2"))
+     shot(P, A)
+     valueSet(P, G)
+  => < P : Pca | > 
+     processing(buttonPressed(P, G, "Shot 1")) .
+  rl [buttonPressed] :
+     < P : Pca | patient : G, database : D > 
+     processing(buttonPressed(P, G, "Shot 1"))
+     inserted(P, D) 
+  => < P : Pca | busy : false > .
+
+  rl [buttonPressed] :
+     < P : Pca | doctor : G, database : D, currentTime : Tm, busy : false >
+     buttonPressed(P, G, "Exit")
+  => < P : Pca | busy : true >
+     processing(buttonPressed(P, G, "Exit"))
+     insert(D, P, d(("time" |-> n(Tm), "msg" |-> s("exit button pressed")))) .
+  rl [buttonPressed] :
+     < P : Pca | doctor : DG, patient : PG, temp-sensor : TS, pulse-sensor : PS, actuator : A, database : D, tick : T, monitor : M >
+     processing(buttonPressed(P, G, "Exit"))
+     inserted(P, D)
+  => < P : Pca | >
+     destroyWindow(DG, P)
+     destroyWindow(PG, P) 
+     destroySensor(TS, P)
+     destroySensor(PS, P)
+     destroyActuator(A, P)
+     destroyDatabase(D, P)
+     destroyMonitor(M, P)
+     stopTimer(T, P) .
+  rl [buttonPressed] :
+     < P : Pca | doctor : DG, temp-sensor : TS, pulse-sensor : PS, actuator : A, patient : PG, tick : T >
+     destroyedWindow(P, DG)
+     destroyedWindow(P, PG)
+     destroyedSensor(P, TS)
+     destroyedSensor(P, PS)
+     destroyedActuator(P, A)
+     destroyedDatabase(P, D)
+     destroyedMonitor(P, M)
+     stoppedTimer(P, T)
+     <G> *** do not remove, otherwise erewrite will not finish
+  => < P : Pca | doctor : null, temp-sensor : null, pulse-sensor : null, actuator : null, patient : null > 
+     deleteTimer(T, P) .
+  rl [buttonPressed] :
+     < P : Pca | tick : T >
+     deletedTimer(P, T)
+  => none .
+
+  rl [tick] :
+     < P : Pca | busy : false >
+     timeOut(P, T)
+  => < P : Pca | busy : true >
+     processing(timeOut(P, T))
+     getTimeSinceEpoch(timeManager, P) .
+  rl [tick] :
+     < P : Pca | patient : PG, round : Shots, time-to-next-shot : CS, 
+                 temp-sensor : TS, pulse-sensor : PS, tick : T,
+                 4-hours : N, shot : N', 
+                 currentTime : Tm >
+     processing(timeOut(P, T))
+     gotTimeSinceEpoch(P, timeManager, Tm')
+  => < P : Pca | round : p1 update(Shots, Tm), remaining : sd(ROUND-AMOUNT, p2 update(Shots, Tm)), 
+                 time-to-next-shot : if CS > TICK-PERIOD then sd(CS, TICK-PERIOD) else 0 fi,
+                 currentTime : Tm' >
+     processing(timeOut(P, T))
+     read(TS, P) 
+     read(PS, P) 
+     setValue(PG, P, "remaining amount (mg)", string(sd(ROUND-AMOUNT, p2 update(Shots, Tm)), 10))
+     setValue(PG, P, "time to next shot (min:sec)", timeString(if CS > TICK-PERIOD then sd(CS, TICK-PERIOD) else 0 fi)) 
+  [print "< " P " : Pca | round : " Shots ", time-to-next-shot : " CS ", 4-hours : " N ", shot : " N' " >"] .
+  rl [tick] :
+     < P : Pca | temp-sensor : TS, pulse-sensor : PS, doctor : DG, patient : PG, 
+                 temperature : TV, pulse : PV, database : D, currentTime : Tm >
+     processing(timeOut(P, T))
+     readResponse(P, TS, TV')
+     readResponse(P, PS, PV')
+     valueSet(P, PG) 
+     valueSet(P, PG) 
+  => < P : Pca | temperature : TV', pulse : PV' >
+     processing(timeOut(P, T))
+     setValue(DG, P, "temperature (C)", floatString(TV')) 
+     insert(D, P, d(("time" |-> n(Tm), "msg" |-> s("temperature read"), "value" |-> n(TV')))) 
+     setValue(DG, P, "pulse", floatString(PV')) 
+     insert(D, P, d(("time" |-> n(Tm), "msg" |-> s("pulse read"), "value" |-> n(PV')))) .
+  rl [tick] :
+     < P : Pca | temp-sensor : TS, pulse-sensor : PS, doctor : DG, patient : PG, 
+                 temperature : TV, pulse : PV, database : D, currentTime : Tm >
+     processing(timeOut(P, T))
+     valueSet(P, DG) 
+     valueSet(P, DG) 
+     inserted(P, D) 
+     inserted(P, D) 
+  => < P : Pca | busy : false > .
+
+  rl [monitor] :
+     < P : Pca | database : D, monitor : M, currentTime : Tm, doctor : G, busy : false > 
+     checked(P, M, ok) 
+  => < P : Pca | busy : true > 
+     processing(checked(P, M, ok) )
+     setValue(G, P, "warnings", "ok")
+     insert(D, P, d(("time" |-> n(Tm), "msg" |-> s("monitor check"), "value" |-> b(true)))) .
+  rl [monitor] :
+     < P : Pca | database : D, monitor : M, currentTime : Tm, doctor : G > 
+     processing(checked(P, M, ok) )
+     valueSet(P, G)
+     inserted(P, D)
+  => < P : Pca | busy : false > .
+  rl [monitor] :
+     < P : Pca | database : D, monitor : M, currentTime : Tm, doctor : G, busy : false > 
+     checked(P, M, failure) 
+  => < P : Pca | busy : true >
+     processing(checked(P, M, failure)) 
+     setValue(G, P, "warnings", "overdose")
+     insert(D, P, d(("time" |-> n(Tm), "msg" |-> s("monitor check"), "value" |-> b(false)))) 
+     buttonPressed(P, P, "Exit") . ---- if a failure is detected the system is stopped
+  rl [monitor] :
+     < P : Pca | database : D, monitor : M, currentTime : Tm, doctor : G > 
+     processing(checked(P, M, failure)) 
+     valueSet(P, G)
+     inserted(P, D)
+  => < P : Pca | busy : false > .
+
+  ---- auxiliary function to convert a number of secs into a time in the format 00:00:00
+  op timeString : Nat -> String .
+  ceq timeString(N') 
+    = string(N quo (60 * 60), 10) 
+      + ":" + (if length(string((N quo 60) rem 60, 10)) == 1 then "0" else "" fi) 
+      + string((N quo 60) rem 60, 10) 
+      + ":" + if length(string(N rem 60, 10)) == 1 then "0" else "" fi + string(N rem 60, 10) 
+      if N := N' quo TICK-PERIOD .
+
+  ---- auxiliary function to convert a float number into a string in the format 0000.00
+  op floatString : Float -> String .
+  eq floatString(F) = string(trunc(rat(F)), 10) + "." + string(trunc((rat(F) * 100) rem 100), 10) .
+
+  ---- auxiliary operation to update the window of shots 
+  op update : Map{Rat, Nat} Rat -> Tuple{Map{Rat, Nat}, Nat} .
+  op update : Map{Rat, Nat} Rat Map{Rat, Nat} Nat -> Tuple{Map{Rat, Nat}, Nat} .
+  eq update(Shots, Tm) = update(Shots, sd(Tm, ROUND-TIME), empty, 0) .
+  eq update((Tm |-> Am, Shots), Tm', Shots', Total)
+    = if Tm < Tm' ---- previous to the current window
+      then update(Shots, Tm', Shots', Total) ---- the shot is not taken into account
+      else update(Shots, Tm', (Tm |-> Am, Shots'), Total + Am) ---- the shot is taken into account
+      fi .
+  eq update(empty, Tm, Shots, Total) = (Shots, Total) .
+
+  op init : -> Configuration .
+  eq init = <G> <> <PCA> create(Pca, oid(0), oid(1)) .
+endom
+
+set print attribute on .

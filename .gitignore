@@ -1,0 +1,9 @@
+# Binaries
+impl/actuator-bin
+impl/sensor-bin
+
+# VSCode
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/settings.json
+spec/pca-spec.zip

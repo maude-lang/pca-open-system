@@ -1,0 +1,73 @@
+---- New actuators are created with createActuator(actuatorManager, O) / createdActuator(O, actuator(i)) messages.
+---- Messages shoot(A, O, N) / shot(O, A) deliver the specified amount of medicine.
+---- Actuator objects keep the amount of drug delivered in the current period. 
+---- The attribute is reset (set to 0) at the end of each period.
+---- 
+---- O                       actuatorManager
+---- |    createActuator()          |
+---- | ---------------------------> |
+---- | createdActuator(actuator(i)) |
+---- | <--------------------------- |   actuator(i)
+---- |                                       |
+---- |            shoot(N)                   |
+---- | ------------------------------------> |
+---- |             shot()                    |
+---- | <------------------------------------ |
+---- |                                       |
+---- |            reset()                    |
+---- | ------------------------------------> |
+---- |           resetAck()                  |
+---- | <------------------------------------ |
+---- |                                       |
+---- |        destroyActuator()              |
+---- | ------------------------------------> |
+---- |       destroyedActuator()             |
+---- | <------------------------------------ |
+
+sload open-system
+
+omod ACTUATOR is
+  inc OPEN-SYSTEM .
+  pr FLOAT .
+ 
+  op actuator : Nat -> Oid .
+
+  class Actuator | amount : Float .
+       
+  msg createActuator : Oid Oid -> Msg . 
+  msg createdActuator : Oid Oid Oid -> Msg .
+  msg shoot : Oid Oid Float -> Msg .
+  msg shot : Oid Oid -> Msg .
+  msg reset : Oid Oid -> Msg .
+  msg resetAck : Oid Oid -> Msg .
+  msg destroyActuator : Oid Oid -> Msg . 
+  msg destroyedActuator : Oid Oid -> Msg .
+
+  vars A O O' : Oid .
+  var  N : Nat .
+  vars F F' : Float .
+
+  rl [create] :
+     < actuatorManager : ObjectManager | index : N > 
+     createActuator(actuatorManager, O)
+  => < actuator(N) : Actuator | amount : 0.0 >
+     < actuatorManager : ObjectManager | index : s N > 
+     createdActuator(O, actuatorManager, actuator(N)) .
+
+  rl [shoot] :
+     < A : Actuator | amount : F > 
+     shoot(A, O, F')
+  => < A : Actuator | amount : F + F' > 
+     shot(O, A) .
+
+  rl [reset] :
+     < A : Actuator | amount : F > 
+     reset(A, O)
+  => < A : Actuator | amount : 0.0 > 
+     resetAck(O, A) .
+
+  rl [destroy] :
+     < A : Actuator | > 
+     destroyActuator(A, O)
+  => destroyedActuator(O, A) .
+endom

@@ -1,0 +1,130 @@
+---- New sensors are created with create(Sensor, O, S) / created(O, S) messages.
+---- Two type of sensors, suclasses of Sensor, can be created: TempSensor and PulseSensor.
+---- New reads from the sensor are requested with read(S, O) / readResponse(O, S, N) messages.
+----
+---- A TCP connection is established with the designated servers from temperature and pulse.
+---- On each read message, a "m" message is sent to the sensor server and the response is
+---- read, converted to an floating-point number, and then returned to the user. Since TCP
+---- does not respect message boundaries, two consecutive reads can mix together and block
+---- the connection with a second receive message without answer.
+----
+---- O
+---- | create(Sensor, O, S)  S                                socketManager
+---- |                       |   createClientTcpSocket("IP", 1234)  |
+---- |                       | -----------------------------------> |
+---- |                       |            createdSocket(R)          |
+---- |                       | <----------------------------------- |
+---- |      created()        |
+---- | <-------------------  |
+---- |                       |
+---- |         read()        |                                   socket
+---- | --------------------> |               send("m")              |
+---- |                       | -----------------------------------> |
+---- |                       |                sent()                |
+---- |                       | <----------------------------------- |
+---- |                       |               receive()              |
+---- |                       | -----------------------------------> |
+---- |                       |              received()              |
+---- |    readResponse(N)    | <----------------------------------- |
+---- | <-------------------- |
+
+sload open-system
+sload socket
+
+omod SENSOR is
+  inc OPEN-SYSTEM .
+  inc SOCKET .
+  inc CONVERSION .
+ 
+  op sensorManager : -> Oid .
+  op sensor : Nat -> Oid .
+
+  class Sensor | socket : Maybe{Oid} .
+  class TempSensor .
+  class PulseSensor .
+  subclasses TempSensor PulseSensor < Sensor .
+       
+  msg createTempSensor : Oid Oid -> Msg . 
+  msg createdTempSensor : Oid Oid Oid -> Msg .
+  msg createPulseSensor : Oid Oid -> Msg . 
+  msg createdPulseSensor : Oid Oid Oid -> Msg .
+  msg read : Oid Oid -> Msg .
+  msg readResponse : Oid Oid Float -> Msg .
+  msg destroySensor : Oid Oid -> Msg .
+  msg destroyedSensor : Oid Oid -> Msg .
+
+  vars S O R : Oid .
+  var  N : Nat .
+  var  T : String .
+
+  rl [create] :
+     < sensorManager : ObjectManager | index : N >
+     createTempSensor(sensorManager, O)
+  => < sensorManager : ObjectManager | index : s N >
+     processing(createTempSensor(sensor(N), O)) 
+     < sensor(N) : TempSensor | socket : null >
+     createClientTcpSocket(socketManager, sensor(N), IP-TEMP-SENSOR, PORT-TEMP-SENSOR) .
+  rl [create] :
+     < sensorManager : ObjectManager | index : N >
+     createPulseSensor(sensorManager, O)
+  => < sensorManager : ObjectManager | index : s N >
+     processing(createPulseSensor(sensor(N), O)) 
+     < sensor(N) : PulseSensor | socket : null >
+     createClientTcpSocket(socketManager, sensor(N), IP-PULSE-SENSOR, PORT-PULSE-SENSOR) .
+  rl [create] : 
+     processing(createTempSensor(S, O)) 
+     < S : TempSensor | socket : null >
+     createdSocket(S, socketManager, R) 
+  => < S : TempSensor | socket : R >
+     createdTempSensor(O, sensorManager, S) .
+  rl [create] : 
+     processing(createPulseSensor(S, O)) 
+     < S : PulseSensor | socket : null >
+     createdSocket(S, socketManager, R) 
+  => < S : PulseSensor | socket : R >
+     createdPulseSensor(O, sensorManager, S) .
+
+  rl [read] :
+     < S : Sensor | socket : R > 
+     read(S, O)
+  => < S : Sensor | socket : R > 
+     processing(read(S, O))
+     send(R, S, "m") .
+  rl [read] :
+     < S : Sensor | socket : R > 
+     sent(S, R)
+  => < S : Sensor | socket : R > 
+     receive(R, S) .
+ ---- temperature sensor
+  rl [read] :
+     < S : TempSensor | socket : R > 
+     processing(read(S, O))
+     received(S, R, T) 
+  => < S : TempSensor | socket : R > 
+     readResponse(O, S, float(substr(T, 0, sd(length(T), 1)))) .   *** remove trailing newline
+  ---- pulse sensor
+  rl [read] :
+     < S : PulseSensor | socket : R > 
+     processing(read(S, O))
+     received(S, R, T) 
+  => < S : PulseSensor | socket : R > 
+     readResponse(O, S, float(substr(T, 0, sd(length(T), 1)))) .
+
+  rl [destroy] :
+     < S : Sensor | socket : R > 
+     destroySensor(S, O)
+  => < S : Sensor | socket : R >
+     processing(destroySensor(S, O))
+     closeSocket(R, S) .
+  rl [destroy] :
+     < S : Sensor | socket : R > 
+     processing(destroySensor(S, O))
+     closedSocket(S, R, T)
+  => destroyedSensor(O, S) .
+endom
+
+eof
+set trace off .
+erew <> < sensorManager : ObjectManager | index : 0 >
+     createTempSensor(sensorManager, oid(0))
+     read(sensor(0), oid(0)) .
