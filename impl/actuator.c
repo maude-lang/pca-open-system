@@ -46,7 +46,7 @@ void handle_shot(const char* units)
 	if (pid == 0) {
 		// Build the message to be spoken
 		char message[256];
-		sprintf(message, "%s milligrames of insuline injected", units);
+		sprintf(message, "%s milligrames injected", units);
 
 		// Use the builtin say command in macOS to spoke the message
 		if (execlp("say", "say", message, NULL) < 0) {

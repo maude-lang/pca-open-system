@@ -9,7 +9,7 @@ The content of this repository is organized in three directories:
 * [`spec`](spec) is a self-contained Maude specification of the PCA unit suitable for formal verification. Some safety checks are executed using Maude bounded search. These checks revealed some flaw that let the patient receive an overdose of analgesia, which is fixed in a second version (by replacing the file [`pca.maude`](spec/pca.maude) with [`pca2.maude`](spec/pca2.maude)).
 * [`impl`](impl) replaces the external-world components (sensors, actuators, databases, GUI, etc.) of the specification in [`spec`](spec) with Maude external objects connecting to external hardware or software outside Maude.
 
-Instructions on how to run these examples can be found in their corresponding directories. [Here](http) is a video showing the behavior of the open system implementation.
+Instructions on how to run these examples can be found in their corresponding directories. [Here](https://youtu.be/6nHAEaIZ4JE) is a video showing the behavior of the open system implementation.
 
 
 Open system components
