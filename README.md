@@ -27,3 +27,5 @@ The PCA unit is an [object-oriented system](https://maude.lcc.uma.es/maude-manua
 Following the Maude convention, `Pca` will create most objects dynamically by sending a message to a manager object, `guiManager`, `databaseManager`, `monitorManager`, `sensorManager`, or `actuatorManager`. These objects will be fully implemented in Maude in the specification, while they will be or interact with external objects in the implementation. However, the `Pca` class (as well as the `Monitor` class) is shared between both variants.
 
 Constants and common declarations for all these objects are kept in [`open-system.maude`](spec/open-system.maude). Other files, like [`configuration.maude`](configuration.maude), [`json.maude`](json.maude), or [`real-time.maude`](real-time.maude), provide the equational infrastructure for the specification.
+
+This [3 minutes video](https://youtu.be/6nHAEaIZ4JE) shows how to run the open system.
